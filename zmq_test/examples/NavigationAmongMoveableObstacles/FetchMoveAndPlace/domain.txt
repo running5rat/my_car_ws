@@ -1,0 +1,22 @@
+   (define (domain lab-car)
+  (:requirements :strips :typing)
+  (:types car block location port)
+   
+   (:action Move
+     :parameters (?c1 - car ?l1 - location ?l2 - location)
+     :precondition(and(car ?c1)(location ?l1)(at ?c1 ?l1))
+     :effect(and(at ?c1 ?l2) not(at ?c1 ?l1))
+     )
+
+   (:action Grab
+     :parameters (?c1 - car ?b1 -block ?l1 - location)
+     :precondition(and(car ?c1)(block ?b1)(at ?c1 ?l1)(at ?b1 ?l1))
+     :effect(and (at ?b1 ?c1) not(at ?b1 ?l1))
+     )
+
+   (:action Unload
+     :parameters (?c1 - car ?b1 -block ?l1 -location ?p1 -port)
+     :precondition(and(car ?c1)(block ?b1)(at ?b1 ?c1)(at ?c1 ?l1)(at ?p1?l1))
+     :effect(and not (at ?b1?c1)  (at ?b1?l1))
+     )
+)

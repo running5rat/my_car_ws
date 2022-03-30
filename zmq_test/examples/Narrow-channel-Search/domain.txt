@@ -1,0 +1,22 @@
+(define (domain lab-car)
+  (:requirements :strips :typing)
+  (:types car)
+
+  (:action Assemble
+     :parameters (?c1 - car ?c2 - car)
+     :precondition(and(car ?c1)(car ?c2))
+     :effect(and(next-to ?c1 ?c2))
+     )
+
+  (:action March
+     :parameters (?c1 - car ?c2 - car)
+     :precondition(and(car ?c1)(car ?c2)  (next-to ?c1 ?c2)  )
+     :effect(and(next-to ?c1 ?c2)(in-Search-Range ?c1 ?c2))
+     )
+     
+  (:action Search
+     :parameters(?c1 -car ?c2 -car )
+     :precondition(and(car ?c1)(car ?c2) (next-to ?c1 ?c2)(in-Search-Range ?c1 ?c2) )
+     :effect(and(target-acquired)(next-to ?c1 ?c2)(in-Search-Range ?c1 ?c2))
+     )
+)

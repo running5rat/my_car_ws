@@ -1,0 +1,22 @@
+(define (domain lab-car)
+  (:requirements :strips :typing)
+  (:types car block location)
+
+  (:action Assemble
+     :parameters (?c1 - car ?c2 - car ?l1 - location)
+     :precondition(and(car ?c1)(car ?c2)(Passability-A ?l1))
+     :effect(and(next-to ?c1 ?c2)(at ?c1 ?c2 ?l1))
+     )
+
+  (:action March
+     :parameters (?c1 -car ?c2 -car ?l1 -location ?b1 - block)
+     :precondition(and(car ?c1)(car ?c2)(next-to ?c1 ?c2)(Passability-M ?l1)(not blocked ?b1))
+     :effect(and(next-to ?c1 ?c2)(at ?c1 ?c2 ?l1) not blocked ?b1)
+     )
+
+   (:action Move-Obstable
+     :parameters (?c1 -car ?c2 -car ?b1 -block)
+     :precondition(and(car ?c1)(car ?c2)(block ?b1)(blocked ?b1))
+     :effect(and (Passability-A entry) not (blocked ?b1) not(next-to ?c1 ?c2)not(next-to ?c2 ?c1))
+     )
+)

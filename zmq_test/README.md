@@ -1,0 +1,1 @@
+1.Due to the CloseWorldAssumption of STRIPS & PDDL,you mustn't mention the negative statement in the init section in problem.txt,that will cause a fault of the whole program.

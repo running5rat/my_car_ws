@@ -1,0 +1,6 @@
+geometry_msgs/Pose goal
+uint8[] idList
+
+---
+
+geometry_msgs/Pose goal

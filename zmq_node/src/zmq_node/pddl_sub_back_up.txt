@@ -1,0 +1,397 @@
+//输出流控制：遍历BHPN节点，如果可以细化，进行pddl_pub,标记节点等待sub
+//如果最后没有可以细化节点，显示并执行。
+
+//third party lib
+#include "jsoncpp/json/json.h"
+//ros
+#include "std_msgs/String.h"
+#include "ros/ros.h"
+//my lib
+#include "zmq_lib.h"
+// #include "msgs.h"
+#include <map>
+#include <utility>
+//receiver 一方面给HostCMD发msgs，另一方面给drawtree提供treenode的格式。
+
+#include "robot_msgs/HostCmdArray.h"
+#include "robot_msgs/HostCmd.h"
+#include "robot_msgs/TreeNode.h"
+#include "robot_msgs/TreeNodeArray.h"
+#include "robot_msgs/Strips_Cmd.h"
+#include "tf/tf.h"
+#include "pddl_add.hpp"
+#include "queue"
+
+//#define Once_offline_planning //Ver1.0 ：没有感知和路径规划支持，所有goal都提前给定。
+#define PerceptionAndReplanning//Ver2.0 add perception&replanning
+
+#define OBSTACLE_LOC_X        -6.45
+#define OBSTACLE_LOC_Y        2.3
+#define UNLOAD_LOC_X            -15.7
+#define UNLOAD_LOC_Y           -4.3
+#define ENTRY_LOC_X               -13.6
+#define ENTRY_LOC_Y                2.3
+#define DESTINATION_LOC_X 1.5
+#define DESTINATION_LOC_Y 2.3
+
+std::string my_simulator;
+
+ enum TaskIndividual
+{
+	NonTask,
+	March_gps,
+	March_laser,
+	Search,
+	Remote_Control,
+	Assemble,
+	Stop,
+	Pause,
+	Resume,
+    Unfinished,
+};
+
+//分层用
+enum TaskType
+{
+    Concrete,
+    Abstruct,
+};
+
+enum TaskType TaskIndividual2TaskType(std::string str)
+{
+    if(action_table.find(str)!=action_table.end())
+        return TaskType::Concrete
+    else
+        return TaskType::Abstruct;
+}
+
+
+std::map<std::string,TaskIndividual>  action_table={
+    {"NonTask",TaskIndividual::NonTask},
+    {"March",TaskIndividual::March_laser},//目前march就是指效果最好的march(march_laser)
+    {"Search",TaskIndividual::Search},
+    {"Remote_Control",TaskIndividual::Remote_Control},
+    {"Assemble",TaskIndividual::Assemble},//assemble在语义里代表两车集结
+    {"Move",TaskIndividual::Assemble},//move是单车集结
+    {"Stop",TaskIndividual::Stop},
+    {"Pause",TaskIndividual::Pause},
+    {"Grab",TaskIndividual::Unfinished},
+    {"Unload",TaskIndividual::Unfinished},
+    // {"Move-Obstable",TaskIndividual::Abstruct},
+};//行为转换表，实际会用的只有Assemble、March、Pause、Stop以后会加入一个抓取与放置两个功能
+
+std::map<std::string,int> id_table={
+{"c0",0},
+{"c1",1},
+{"c2",2},
+{"c3",3},
+{"c4",4},
+{"c5",5},
+{"c6",6},
+{"c7",7},
+{"c8",8},
+{"c9",9},
+};//自动生成行为树功能只支持最多10个车,(可拓)
+
+ enum Locations
+{
+	Entry,
+	Destination,
+    Obstacle_site,
+    Unload_site,
+    Start_site,
+};
+
+std::map<std::string,Locations>location_table={
+    {"entry",Entry},
+    {"destination",Destination},
+    {"Obstableloc",Obstacle_site},
+    {"Unloadingloc",Unload_site},
+    {"Startloc",Start_site},
+};
+
+std::vector<geometry_msgs::PoseStamped> MapFromLocation2Pose(std::string location){
+    std::vector<geometry_msgs::PoseStamped> goals;
+    geometry_msgs::PoseStamped goal;
+    double yaw=0;
+    goal.pose.orientation = tf::createQuaternionMsgFromYaw(yaw);
+    goal.pose.position.z = 0;
+
+   switch (location_table[location])//string的switch方法：Hash/Map
+   {
+    //start_loc不参与host_cmd，而且不是一个固定位置，暂不做处理
+   case Locations::Start_site:
+       break;
+//之后要让给定感知
+    case Locations::Obstacle_site:
+        goal.pose.position.x=OBSTACLE_LOC_X;
+        goal.pose.position.y=OBSTACLE_LOC_Y;
+       break;
+
+    case Locations::Unload_site:
+        goal.pose.position.x=UNLOAD_LOC_X;
+        goal.pose.position.y=UNLOAD_LOC_Y;
+       break;
+   
+   case Locations::Entry:
+        goal.pose.position.x=ENTRY_LOC_X;
+        goal.pose.position.y=ENTRY_LOC_Y;
+       break;
+    case Locations::Destination:
+        goal.pose.position.x=DESTINATION_LOC_X;
+        goal.pose.position.y=DESTINATION_LOC_Y;
+       break;
+
+   default:
+       break;
+   }
+   goals.push_back(goal);//之前为了兼容多goal的搜索问题，把host_cmd写成带vector::pose了
+    return goals;
+}
+
+struct Tree_Node{
+std::vector< std::string> precondition;
+std::string action;
+std::vector< std::string> effect;
+std::vector<std::string> car_id;
+};
+
+
+struct PDDL_CMD
+{
+    PDDL_CMD(int total_car_number){
+        ros::NodeHandle nh;
+        std::string simulator;
+        
+        task_sequnce_pub=nh.advertise<robot_msgs::HostCmdArray>("/host_cmd",10);
+        tree_nodes_pub=nh.advertise<robot_msgs::TreeNodeArray>("/tree_node_array",10);
+
+        nh.getParam("simulator",simulator);
+        for(int i = 0 ; i < total_car_number ; i++){
+             std::string topic_name;
+             
+            if(simulator=="stage")
+            {
+                topic_name= "/robot_" + std::to_string(i) + "/host_cmd";
+                ROS_INFO("In Stage,the topic name is :%s!",topic_name);
+            }
+            else
+                if(simulator=="gazebo")
+                {
+                    topic_name = "/robot" + std::to_string(i+1) + "/host_cmd";
+                    ROS_INFO("In Gazebo,the topic name is :%s!",topic_name);
+                }
+
+            ros::Publisher pub = nh.advertise<robot_msgs::HostCmdArray>(topic_name,10);
+            car_pubs.push_back(pub);
+        }
+    }
+    Json::Value string2json(std::string &msg){//从zmq传输格式到json
+        Json::Value json;
+        Json::Reader reader;
+        reader.parse(msg.c_str(),json);
+        return json;
+    }
+    void Json2BHPN(Json::Value json)
+    {
+        
+    }
+    void BHPN2BT(Json::Value json,)
+    {
+
+    }
+    void BHPN2HostCMD(Json::Value json,)
+    {
+
+    }
+    void  decode_pddl_CMD(Json::Value json,std::vector<Tree_Node> &tree_nodes,robot_msgs::HostCmdArray &task_sequnce_former){
+        // ROS_INFO("Received json msg:%s",json.toStyledString().c_str());
+        Tree_Node temp_node;
+        robot_msgs::HostCmd temp_task;
+
+        tree_nodes.clear();
+        robot_msgs::HostCmdArray task_sequnce;
+
+        for(int i=0;i<json.size();i++)
+        {
+            temp_task.car_id.clear();
+            temp_node.action.clear();
+            std::vector<std::string>().swap(temp_node.car_id);
+            std::vector<std::string>().swap(temp_node.effect);
+            std::vector<std::string>().swap(temp_node.precondition);
+
+            //Section 1:抽象动作
+            if(TaskIndividual2TaskType(temp_node.action)==TaskType::Abstruct)
+            {
+                //对抽象动作重规划  
+                ros::Publisher strips_pub=nh.advertise<robot_msgs::Strips_Cmd>("/strips_cmd",10);
+                robot_msgs::Strips_Cmd strips_cmd;
+                strips_cmd.domain_add.data=Situation_Domain_Address2;
+                strips_cmd.problem_add.data=Situation_Problem_Address2;
+                strips_pub.publish(sim_perception_agent.strips_cmd);
+                while(flag);
+
+
+            }
+            //Section 2:缺乏实现的动作
+            else if(action_table[temp_node.action]==TaskIndividual::Unfinished)
+            {
+                //只显示，不实现
+                temp_node.action= json[i]["action"].asString();
+                for(int j=0;j<json[i]["precondition"].size();j++)
+                {
+                        if(json[i]["precondition"][j]["operation"]=="not")
+                            temp_node.precondition.push_back("not "+json[i]["precondition"][j]["action"].asString());
+                        else
+                            temp_node.precondition.push_back(json[i]["precondition"][j]["action"].asString());
+                }
+
+                for(int j=0;j<json[i]["effect"].size();j++)
+                        temp_node.effect.push_back(json[i]["effect"][j]["action"].asString());
+                tree_nodes.push_back(temp_node);
+            }
+            //Section 3:可实现动作
+            else
+            {
+                //显示实现都要
+                //1.显示
+                temp_node.action= json[i]["action"].asString();
+                                for(int j=0;j<json[i]["precondition"].size();j++)
+                {
+                        if(json[i]["precondition"][j]["operation"]=="not")
+                            temp_node.precondition.push_back("not "+json[i]["precondition"][j]["action"].asString());
+                        else
+                            temp_node.precondition.push_back(json[i]["precondition"][j]["action"].asString());
+                }
+
+                for(int j=0;j<json[i]["effect"].size();j++)
+                        temp_node.effect.push_back(json[i]["effect"][j]["action"].asString());
+                tree_nodes.push_back(temp_node);
+                //2.实现
+                temp_task.mission.mission=action_table[temp_node.action];
+                for(int j=0;j<json[i]["parameters"].size();j++)//之前只有car_id，现在还有block_id和location、port
+                {
+                    if(json[i]["parameters"][j]["type"].asString()=="car")//是车辆信息
+                    {
+                        temp_node.car_id.push_back(json[i]["parameters"][j]["parameter"].asString());
+                        temp_task.car_id.push_back(id_table[json[i]["parameters"][j]["parameter"].asString()]);
+                    }
+
+                    if(json[i]["parameters"][j]["type"].asString()=="block")//是障碍物信息
+                        ;
+                    if(json[i]["parameters"][j]["type"].asString()=="location")//是位置信息
+                        temp_task.goal=MapFromLocation2Pose(json[i]["parameters"][j]["parameter"].asString());
+                    //block_id和port先不处理~
+                }
+                task_sequnce.host_cmd_array.push_back(temp_task);
+
+            }
+
+        }
+    task_sequnce_former=task_sequnce;
+    }
+
+    robot_msgs::TreeNodeArray tree_nodes2draw_tree_cmd(std::vector<Tree_Node>  &tree_nodes){
+        robot_msgs::TreeNode tree_node;
+        robot_msgs::TreeNodeArray tree_node_array;
+        for(auto node:tree_nodes)
+        {
+            tree_node.precondition.clear();
+            tree_node.effect.clear();
+            std::string temp_str=node.action;//action 在draw_tree中的显示内容是action+id1+id2+……
+            for(auto id:node.car_id)
+                temp_str+=' '+id;//结合action的car_id
+            tree_node.action=temp_str;//最终的action形式是Assemble c1 c2
+            for(auto i:node.precondition)
+            {
+                if(i!="car")//目前只记录不是属性(car)的precondition
+                    tree_node.precondition.push_back(i);
+            }
+
+            for(auto i:node.effect)
+                    tree_node.effect.push_back(i);
+
+            tree_node_array.tree_node_array.push_back(tree_node);
+        }
+        return tree_node_array;
+    }
+
+
+    void PubTaskSequnce(robot_msgs::HostCmdArray &task_sequnce){
+        task_sequnce_pub.publish(task_sequnce);
+        for(auto pub:car_pubs)
+            pub.publish(task_sequnce);
+    }
+
+    void PubTreeNode(robot_msgs::TreeNodeArray &tree_nodes){
+        tree_nodes_pub.publish(tree_nodes);
+    }
+
+
+
+
+ros::Publisher task_sequnce_pub;
+ros::Publisher tree_nodes_pub;
+
+ros::Publisher pddl_repub;
+
+std::vector<ros::Publisher> car_pubs;
+};
+
+
+int main(int argc, char** argv){
+
+    ros::init(argc,argv,"receiver");
+    ros::NodeHandle nh;
+    nh.getParam("simulator",my_simulator);
+
+    //config id & ip
+    std::string pddl_ip="127.0.0.1:3000";
+
+    int total_car_number;
+    nh.param("/total_car_number",total_car_number,4);
+    PDDL_CMD pddl_cmd(total_car_number);
+
+    //zmq_init
+    zmq::context_t ctx(1);
+    zmq_lib::Receiver pddl_receive(std::vector<std::string>{pddl_ip},ctx);
+
+    std::string msg;
+    std::vector<Tree_Node>  tree_nodes;
+    robot_msgs::HostCmdArray task_sequnce;
+    robot_msgs::TreeNodeArray tree_node_array;
+
+
+    ros::Rate loop(20);
+    while(ros::ok()){
+        msg.clear();
+        //接收信息
+        pddl_receive.receiveMsg(msg);
+        //信息判空
+        if(!msg.empty()){
+        tree_nodes.clear();
+        task_sequnce.host_cmd_array.clear();
+        tree_node_array.tree_node_array.clear();
+
+        //信息转json
+        Json::Value json = pddl_cmd.string2json(msg);
+
+        //json解码到命令和行为树格式
+        pddl_cmd.decode_pddl_CMD(json,tree_nodes,task_sequnce);
+        //json解码到BHPN
+        std::queue <int>
+
+        //发送命令
+        pddl_cmd.PubTaskSequnce(task_sequnce);
+        //发送行为树
+        tree_node_array= pddl_cmd.tree_nodes2draw_tree_cmd(tree_nodes);
+        pddl_cmd.PubTreeNode(tree_node_array);
+        }
+        ros::spinOnce();
+
+        loop.sleep();
+
+    }
+    return 0;
+}
+

@@ -1,0 +1,9 @@
+(define(problem first-problem)
+    (:domain lab-car)
+    (:objects
+        c1 c2 - car
+        b1 - block
+        entry destination - location)
+    (:init(and (car c1)(car c2)(block b1)(location entry)(location destination)(Passability-A entry)(Passability-M destination)(blocked b1)))
+    (:goal and (next-to c1 c2) (at c1 c2 destination))
+)

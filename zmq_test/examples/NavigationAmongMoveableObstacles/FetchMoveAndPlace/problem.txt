@@ -1,0 +1,10 @@
+(define(problem first-problem)
+    (:domain lab-car)
+    (:objects
+        c1 - car
+        b1 - block
+        UnloadPort - port
+        Obstableloc Unloadingloc Startloc  - location)
+    (:init(and (car c1)(block b1)(port UnloadPort)(location Startloc)(location Obstableloc)(location Unloadingloc)(at c1 Startloc)(at b1 Obstableloc)(at UnloadPort Unloadingloc)))
+    (:goal and (at b1 Unloadingloc))
+) 

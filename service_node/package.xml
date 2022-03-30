@@ -1,0 +1,33 @@
+<package>
+    <name>service_node</name>
+    <version>1.0.0</version>
+    <description>
+        Service node provide planning service for robot
+    </description>
+    <author>banchao</author>
+    <maintainer email="banchao22@126.com">banchao</maintainer>
+    <license>GPL 3.0 </license>
+
+    <buildtool_depend>catkin</buildtool_depend>
+
+    <build_depend>actionlib</build_depend>
+    <build_depend>roscpp</build_depend>
+    <build_depend>robot_msgs</build_depend>
+    <build_depend>rospy</build_depend>
+    <build_depend>costmap_2d</build_depend>
+    <build_depend>tf</build_depend>
+    <build_depend>geometry_msgs</build_depend>
+
+    <run_depend>actionlib</run_depend>
+    <run_depend>roscpp</run_depend>
+    <run_depend>robot_msgs</run_depend>
+    <run_depend>rospy</run_depend>
+    <run_depend>costmap_2d</run_depend>
+    <run_depend>tf</run_depend>
+    <run_depend>geometry_msgs</run_depend>
+    <run_depend>nav_msgs</run_depend>
+
+    <export>
+    </export>
+
+</package>

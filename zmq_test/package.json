@@ -1,0 +1,20 @@
+{
+  "name": "zmq_test",
+  "version": "1.0.0",
+  "description": "this is a combaination of ZMQ and PDDL",
+  "main": "test.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "tiger",
+  "license": "ISC",
+  "dependencies": {
+    "json": "^11.0.0",
+    "strips": "0.0.10",
+    "zeromq": "^5.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^15.0.2",
+    "@types/zeromq": "^5.2.0"
+  }
+}

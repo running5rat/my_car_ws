@@ -1,0 +1,7 @@
+(define(problem first-problem)
+    (:domain lab-car)
+    (:objects
+        c1 c2 - car)
+    (:init(and (car c1)(car c2)))
+    (:goal and(target-acquired))
+)

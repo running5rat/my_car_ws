@@ -1,0 +1,20 @@
+<launch>
+
+    <!--启动键盘控制节点-->
+    <node name="apm_teleop_key" type="apm_teleop_key.py" pkg="teleop_key" output="screen">
+				<!--max linear speed-->
+        <param name="max_vel" value="1.0"/>
+				<!--max angular speed-->
+        <param name="max_ang" value="2.0"/>
+				<!--linear speed step-->
+        <param name="vel_step" value="0.1"/>
+				<!--angular speed step-->
+        <param name="ang_step" value="0.2"/>
+				<!--simulation-->
+        <remap from="cmd_vel" to="/robot1/cmd_vel"/>
+				<!--amovcar-->
+				<!--remap from="cmd_vel" to="/robot1/cmd_vel
+"/-->
+    </node>
+
+</launch>

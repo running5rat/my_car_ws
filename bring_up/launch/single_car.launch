@@ -1,0 +1,142 @@
+<!-- 
+    全局参数包括：
+        1、全部车辆数量
+        2、车辆id（从1开始）
+        3、车辆ip地址、hostip地址
+        4、硬件端口号
+
+    运行的节点包括：
+        1、坐标系变换：static tf
+        2、资源节点：driver_source_node
+        3、控制节点：remote_control_node
+        4、遥控接收：joy_node（库）
+        5、地图：    map_server（库）
+        6、定位节点：ndt_localization
+        7、决策树：  decision_node
+        8、任务节点：task_node
+        9、规划节点：move_base（库）
+        10、激光driver
+        11、pointcloud 2 laserscan
+        12、服务节点:散点
+        14、通讯节点:
+        15、可视化:  rviz（库）
+ -->
+
+<launch>
+    <!-- 全局参数 -->
+    <param name="is_simulation" value="false"/>
+    <!-- ip只有通讯节点使用 -->
+    <arg name="car_id" value="2"/>
+    <param name="total_car_number" type="int" value="2" />
+    <param name="car_id" type="int" value="$(arg car_id)" />
+    <param name="host_ip_address" type="string" value="192.168.0.30:6666" />
+    <param name="my_ip_address" type="string" value="192.168.0.14:6666" />
+    <rosparam>
+        total_robot_ip: ["192.168.0.14:6666","192.168.0.20:6666"]
+    </rosparam>
+    <rosparam>
+        debug_output_id: [1,2]
+    </rosparam>
+    <!-- 下面两个source_node使用 -->
+    <!-- ttyUSB0为驱动接口，无需改变 -->
+    <param name="imu_port" type="string" value="/dev/imu_port" />
+    <param name="gps_port" type="string" value="/dev/gps_port" />
+    <!-- 遥控器接口 -->
+    <arg name="joy_port" value="/dev/input/js0"/>
+    <include file="$(find realsense2_camera)/launch/rs_t265.launch" />
+    <include file="$(find apriltag_ros)/launch/continuous_detection.launch" />
+    <!-- 1 -->
+    <node pkg="tf" type="static_transform_publisher" name="world_map_broadcaster" args="0 0 -0.4 0 0 0 /world /map 100" />
+    <node pkg="tf" type="static_transform_publisher" name="lidar_base_broadcaster" args="-0.2 0 -0.4 0 0 0 /lidar_link /base_link 100" />
+    <node pkg="tf" type="static_transform_publisher" name="lidar_velodyne_broadcaster" args="0 0 0 0 0 0 /lidar_link /velodyne 100" />
+    <!-- 2 -->
+    <node pkg="source_node"  type="driver_source_node"      name="driver_source_node"     output="screen"/> 
+    <node pkg="source_node"  type="navigation_source_node"  name="navigation_source_node" output="screen"/> 
+    <!-- 3 -->
+    <node pkg="control_node" type="remote_control_node" name="remote_control_node" output="screen"/> 
+    <!-- 4 -->
+    <node respawn="true" pkg="joy" type="joy_node" name="gamepad" >
+        <param name="dev" type="string" value="$(arg joy_port)" />
+        <param name="deadzone" value="0.0" />
+        <param name="autorepeat_rate" value="10.0" />
+    </node>
+    <!-- 5 -->
+    <node name="map_server" pkg="map_server" type="map_server"  args="$(find bring_up)/map/map0611.yaml"/>
+    <!-- 6 -->
+    <node name="scan_to_submap_imu_node" pkg="ndt_localization" type="scan_to_submap_imu_node" >
+        <param name="score_threshold" type = "double" value="3.00" />
+        <param name="imu_enable" type = "bool" value="false" />
+        <param name="initial_x " type = "double" value="113.0" />
+        <param name="initial_y" type = "double" value="88.0" />
+        <param name="initial_yaw" type = "double" value="0.0" />
+    </node>
+    <!-- 7 -->
+    <node pkg="task_node"      type="build_up_task_nohost" name="build_up_task_nohost"     />
+    <node pkg="task_node"      name="gps_march_task"       type="gps_march_task"          />
+    <node pkg="task_node"      name="laser_march_task"     type="laser_march_task"         />
+    <node pkg="task_node"           name="search_task"          type="search_task"           output="screen"    />
+
+    <!-- 8 -->
+    <node pkg="decision_node" type="decision_node"  name="decision_node"   output="screen" />
+    <!-- 9 -->
+    <node pkg="move_base" type="move_base" respawn="false" name="move_base" >
+        <rosparam file="$(find bring_up)/cfg/real_world/car$(arg car_id)/costmap_common_params.yaml" command="load" ns="global_costmap" />
+  	 	<rosparam file="$(find bring_up)/cfg/real_world/car$(arg car_id)/costmap_common_params.yaml" command="load" ns="local_costmap" />
+  		<rosparam file="$(find bring_up)/cfg/real_world/car$(arg car_id)/local_costmap_params.yaml" command="load" />
+  		<rosparam file="$(find bring_up)/cfg/real_world/car$(arg car_id)/global_costmap_params.yaml" command="load" />
+  		<rosparam file="$(find bring_up)/cfg/real_world/car$(arg car_id)/teb_local_planner_params.yaml" command="load" />
+
+		<param name="base_global_planner" value="global_planner/GlobalPlanner" />
+		<param name="planner_frequency" value="1.0" />
+		<param name="planner_patience" value="5.0" />
+
+		<param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" />
+		<param name="controller_frequency" value="5.0" />
+		<param name="controller_patience" value="15.0" />
+
+        <param name="clearing_rotation_allowed" value="false" />
+	</node>
+    <!-- 10 -->
+    <include file="$(find velodyne_pointcloud)/launch/VLP16_points.launch" />
+    <!-- 11 -->
+    <node pkg="pointcloud_to_laserscan" type="pointcloud_to_laserscan_node" name="pointcloud_to_laserscan">
+
+        <remap from="cloud_in" to="velodyne_points"/>
+        <remap from="scan" to="base_scan"/>
+        
+        <rosparam>
+            # target_frame: rslidar # Leave disabled to output scan in pointcloud frame
+            transform_tolerance: 0.01
+            min_height: -0.3
+            max_height: 0.6
+
+            angle_min: -3.1415926 # -M_PI
+            angle_max: 3.1415926 # M_PI
+            angle_increment: 0.003 # 0.17degree
+            scan_time: 0.1
+            range_min: 1.3
+            range_max: 50
+            use_inf: true
+            inf_epsilon: 1.0
+
+            # Concurrency level, affects number of pointclouds queued for processing and number of threads used
+            # 0 : Detect number of cores
+            # 1 : Single threaded
+            # 2->inf : Parallelism level
+            concurrency_level: 1
+        </rosparam>
+
+    </node>
+    <!-- 12 -->
+    <node pkg="service_node"        type="separate_goal"        name="separate_goal"        output="screen"   />
+    <node pkg="service_node" type="path_coverage"      name="path_coverage"  clear_params="true" output="screen"  >
+        <rosparam file="$(find bring_up)/cfg/real_world/car$(arg car_id)/path_coverage_param.yaml" command="load" />
+    </node>
+    <node pkg="service_node" type="path_follow"        name="path_follow"  output="screen"/>   
+    <!-- 12 -->
+    <node pkg="communication_node" name="receiver" type="receiver" />
+    <node pkg="communication_node" name="publisher" type="publisher" />
+    <!-- 14 -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find bring_up)/rviz/single_car_real_world.rviz" />
+
+</launch>
